@@ -2,16 +2,21 @@ import pandas as pd
 import datetime
 from fastapi import FastAPI, UploadFile,File
 import calendar
+from openpyxl.utils import get_column_letter
+import numpy as np
 
 app = FastAPI()
 
 @app.post("/timesheet")
-def generate_timesheet(file: UploadFile = File(...)):
-    with open(file.filename, "wb") as f:
-        f.write(file.file.read())
-    df = pd.read_excel(file.filename, sheet_name='in', keep_default_na=False, parse_dates=True)
+def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(...)):
+
+    #input-1<<<<<<<<-------------------------File1 -------------------------------------------->>>>>>>>
+    with open(file1.filename, "wb") as f:
+        f.write(file1.file.read())
+    df = pd.read_excel(file1.filename, sheet_name='in', keep_default_na=False, parse_dates=True)
     billable_data = df[df["Billing Action"] == "Billable"]
     billable_data["Date"] = pd.to_datetime(billable_data["Date"], format="%Y-%m-%d")
+    billable_data['Time Quantity'] = billable_data['Time Quantity'].replace(10, 9)
 
     # get the year, month, date
     year = billable_data["Date"].dt.year.unique()[0]
@@ -30,9 +35,18 @@ def generate_timesheet(file: UploadFile = File(...)):
     for day in range(1, num_days + 1):
         if datetime.datetime(year, month, day).weekday() in [5, 6]:
             weekend_dates.append(datetime.datetime(year, month, day).strftime("%b-%d"))
+
+   # input2<<<<<<<<-------------**** File2*****--------------------------------------------->>>>>>>>
+    with open(file2.filename, "wb") as f:
+        f.write(file2.file.read())
+    df2 = pd.read_excel(file2.filename, keep_default_na=False, parse_dates=True)
+    location_data = df2[df2["Off/On"] == "Offshore"]
     
-    # unique values of employee
-    unique_employee_ids = billable_data["Employee ID"].unique()
+    #merged both file1 and file2
+    merged_data = pd.merge(billable_data, location_data, on="Employee ID", how="left")
+    
+    # unique values of both 1 &2
+    unique_employee_ids = merged_data["Employee ID"].unique()
     
     # Create a new dataframe 
     result = pd.DataFrame(columns=["Sl No",
@@ -40,31 +54,56 @@ def generate_timesheet(file: UploadFile = File(...)):
                                    "Project Name",
                                    "Employee ID", 
                                    "Name", 
-                                   "Location", 
+                                   "ON/OF", 
+                                   "Location",
                                    "Total_Worked_Days",
-                                   "Total_billable_hours"] + dates)
+                                   "Total_billable_hours",
+                                    "Hourly_rate",
+                                    "Total cost"] + dates)
+    
+    
     
     # Loop through each unique "Employee ID"
     for i, employee_id in enumerate(unique_employee_ids):
-        employee_data = billable_data[billable_data["Employee ID"] == employee_id]
+        employee_data = merged_data[merged_data["Employee ID"] == employee_id]
         num_worked_days = len(employee_data["Date"].unique())
         total_hours=employee_data["Time Quantity"].sum()
         
-        # content in the row
+         # content in the row
         first_row = employee_data.iloc[0]
+
+        #input 2 <<<<<<<<<<<<<<<<<---------------------------------->>>>>>>>>>>>>>>>>>>>>>>>>
+        # ------hourly rate---******************************---------
+        hourly_rate = (first_row["Rate"])
+        hourly_rate_formatted = ("${:}".format(hourly_rate))
+        hourly=hourly_rate_formatted.replace('$nan', '0')
+
+
+        #---------------Total_cost--------------*********************-------------------
+        total_cost = float(total_hours) * hourly_rate
+        cost = ("${:}".format(total_cost))
+        costly=cost.replace('$nan', '0')
+
+       
+        #genereate sequence of both 1&2
         result_row = {"Sl No": i+1,
                       "Project": first_row["Project"],
                       "Project Name": "AGERO FULL STACK DEV T&M",
                       "Employee ID": first_row["Employee ID"],
                       "Name": first_row["Name"],
-                      "Location": first_row["ON / OF"],
+                      "ON/OF": first_row["ON / OF"],
+                      "Location":first_row["Location"],
                       "Total_Worked_Days": num_worked_days,
-                      "Total_billable_hours":total_hours}
+                      "Total_billable_hours":total_hours,
+                      "Hourly_rate":hourly,
+                      "Total cost":costly
+                    
+                     
+                      }
       
         # Add the result row to the result dataframe
         result = result.append(result_row, ignore_index=True)
-        
-        # date fetch time quantity
+        # date fetch time quantity for sum method as billable
         for date in dates:
             grouped_data = employee_data.groupby(["Date", "Employee ID"])["Time Quantity"].sum().reset_index()
             date_data = grouped_data[grouped_data["Date"].dt.strftime("%b-%d") == date]
@@ -83,17 +122,26 @@ def generate_timesheet(file: UploadFile = File(...)):
           color = 'yellow'
        elif value==8:
           color='None'
-       elif value==10:
-          color='None'
        else:
           color = 'red'
        return f'background-color: {color}'   
     styler = result.style.set_properties(**{'text-align': 'center'}).applymap(color_background, subset=pd.IndexSlice[:, dates])
+    
     for date in weekend_dates:
         styler = styler.set_properties(**{'background-color': 'None'}, subset=date)
-
-        
+    
     #  result dataframe to a new excel file
-    styler.to_excel("time.xlsx", index=False)
-    return ("Timesheet has been created successfully")
+    writer = pd.ExcelWriter("timesheet.xlsx", engine='openpyxl')
+    styler.to_excel(writer, sheet_name='Sheet1', index=False)
+
+    # Access the worksheet and set column widths
+    worksheet = writer.sheets['Sheet1']
+    column_widths = [7, 15, 27, 12, 35, 8, 17, 18, 20, 20,20] 
+    for i, width in enumerate(column_widths):
+        column_letter = get_column_letter(i+1) 
+        worksheet.column_dimensions[column_letter].width = width 
+
+    writer.save()
+    return "Timesheet has been created successfully"
+    
 
