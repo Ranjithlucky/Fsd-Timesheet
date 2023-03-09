@@ -29,6 +29,8 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
        date = datetime.datetime(year, month, day)
        if date.strftime("%b-%d") not in dates:
             dates.append(date.strftime("%b-%d"))
+
+    
     
     # weekend for to give css
     weekend_dates = []
@@ -36,14 +38,16 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
         if datetime.datetime(year, month, day).weekday() in [5, 6]:
             weekend_dates.append(datetime.datetime(year, month, day).strftime("%b-%d"))
 
+    
+
    # input2<<<<<<<<-------------**** File2*****--------------------------------------------->>>>>>>>
     with open(file2.filename, "wb") as f:
         f.write(file2.file.read())
     df2 = pd.read_excel(file2.filename, keep_default_na=False, parse_dates=True)
     location_data = df2[df2["Off/On"] == "Offshore"]
-    
     #merged both file1 and file2
-    merged_data = pd.merge(billable_data, location_data, on="Employee ID", how="left")
+    merged_data = pd.merge(billable_data, location_data,on="Employee ID", how="left")
+
     
     # unique values of both 1 &2
     unique_employee_ids = merged_data["Employee ID"].unique()
@@ -66,8 +70,21 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
     # Loop through each unique "Employee ID"
     for i, employee_id in enumerate(unique_employee_ids):
         employee_data = merged_data[merged_data["Employee ID"] == employee_id]
-        num_worked_days = len(employee_data["Date"].unique())
+        #total hours
         total_hours=employee_data["Time Quantity"].sum()
+        
+        #total working days
+        total_worked_days = 0
+        for hours in employee_data["Time Quantity"]:
+            if hours == 8:
+               total_worked_days += 1
+            elif hours == 4.5:
+              total_worked_days += 0.5
+            elif hours == 9:
+              total_worked_days += 1
+            else:
+              total_worked_days += 0.5
+            
         
          # content in the row
         first_row = employee_data.iloc[0]
@@ -75,14 +92,15 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
         #input 2 <<<<<<<<<<<<<<<<<---------------------------------->>>>>>>>>>>>>>>>>>>>>>>>>
         # ------hourly rate---******************************---------
         hourly_rate = (first_row["Rate"])
-        hourly_rate_formatted = ("${:}".format(hourly_rate))
+        hourly_rate_formatted = ("${:.2f}".format(hourly_rate))
         hourly=hourly_rate_formatted.replace('$nan', '0')
 
 
         #---------------Total_cost--------------*********************-------------------
         total_cost = float(total_hours) * hourly_rate
-        cost = ("${:}".format(total_cost))
+        cost = ("${:.2f}".format(total_cost))
         costly=cost.replace('$nan', '0')
+        
 
        
         #genereate sequence of both 1&2
@@ -93,22 +111,24 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
                       "Name": first_row["Name"],
                       "ON/OF": first_row["ON / OF"],
                       "Location":first_row["Location"],
-                      "Total_Worked_Days": num_worked_days,
+                      "Total_Worked_Days":total_worked_days,
                       "Total_billable_hours":total_hours,
                       "Hourly_rate":hourly,
                       "Total cost":costly
-                    
-                     
                       }
-      
+        
         # Add the result row to the result dataframe
         result = result.append(result_row, ignore_index=True)
+
+       
+
         # date fetch time quantity for sum method as billable
         for date in dates:
             grouped_data = employee_data.groupby(["Date", "Employee ID"])["Time Quantity"].sum().reset_index()
             date_data = grouped_data[grouped_data["Date"].dt.strftime("%b-%d") == date]
             if not date_data.empty:
                 time_quantity = date_data["Time Quantity"].iloc[0]
+               
                 result.loc[result["Employee ID"] == employee_id, date] = time_quantity
             else:
                 result_row[date] = " "
@@ -131,7 +151,7 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
         styler = styler.set_properties(**{'background-color': 'None'}, subset=date)
     
     #  result dataframe to a new excel file
-    writer = pd.ExcelWriter("timesheet.xlsx", engine='openpyxl')
+    writer = pd.ExcelWriter("time.xlsx", engine='openpyxl')
     styler.to_excel(writer, sheet_name='Sheet1', index=False)
 
     # Access the worksheet and set column widths
