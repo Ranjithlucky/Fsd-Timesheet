@@ -47,7 +47,7 @@ def generate_timesheet(file1: UploadFile = File(...),file2: UploadFile = File(..
     location_data = df2[df2["Off/On"] == "Offshore"]
     #merged both file1 and file2
     merged_data = pd.merge(billable_data, location_data,on="Employee ID", how="left")
-
+    print(merged_data)
     
     # unique values of both 1 &2
     unique_employee_ids = merged_data["Employee ID"].unique()
